@@ -1,6 +1,5 @@
 const fetch = require('node-fetch');
-const util = require('util');
-const parseXML = util.promisify(require('xml2js').parseString);
+
 const {
     GraphQLSchema,
     GraphQLObjectType,
@@ -23,8 +22,7 @@ function translate(lang, str) {
                 .translations[0]
                 .translatedText
             )
-  }
-
+}
 
 const BookType = new GraphQLObjectType({
     name: 'Book',
@@ -44,6 +42,14 @@ const BookType = new GraphQLObjectType({
         isbn: {
             type: GraphQLString,
             resolve: xml => xml.GoodreadsResponse.book[0].isbn[0]
+        },
+        authors: {
+            type: new GraphQLList(AuthorType),
+            resolve: (xml, args, context) => {
+                const authorElements = xml.GoodreadsResponse.book[0].authors[0].author;
+                const ids = authorElements.map(author => author.id[0]);
+                return context.authorLoader.loadMany(ids)
+            }
         }
     })
 })
@@ -61,13 +67,9 @@ const AuthorType = new GraphQLObjectType({
         },
         books: {
             type: new GraphQLList(BookType),
-            resolve: xml => {
+            resolve: (xml, args, context) => {
                 const ids = xml.GoodreadsResponse.author[0].books[0].book.map(element => element.id[0]._)
-                return Promise.all(ids.map(id =>
-                    fetch(`https://www.goodreads.com/book/show/${id}?format=xml&key=19fgqrJQRhH60l8LRx8ug`)
-                        .then(response => response.text())
-                        .then(parseXML)
-                ))
+                return context.bookLoader.loadMany(ids)
             }
         }
     })
@@ -84,13 +86,7 @@ module.exports = new GraphQLSchema({
                 args: {
                     id: { type: GraphQLInt}
                 },
-                resolve: (root, args) => (
-                    fetch(
-                        `https://www.goodreads.com/author/show/${args.id}?format=xml&key=19fgqrJQRhH60l8LRx8ug`
-                    )
-                )
-                .then(response => response.text())
-                .then(parseXML)
+                resolve: (xml, args, context) => context.authorLoader.load(args.id)
             }
         })
     })
